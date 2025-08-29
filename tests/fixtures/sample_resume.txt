@@ -1,0 +1,9 @@
+Jane Smith
+Senior Software Engineer
+5 years experience
+
+Skills: Python, JavaScript, React, Node.js, AWS, Docker, Kubernetes
+Experience:
+- Tech Solutions Inc (2020-2023): Backend development and system architecture
+- StartupXYZ (2018-2020): Full-stack development and DevOps
+Education: BS Computer Science, Tech University

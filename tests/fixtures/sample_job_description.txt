@@ -1,0 +1,15 @@
+Senior Backend Engineer
+Company: TechCorp Industries
+
+Requirements:
+- 5+ years Python experience
+- Strong system design skills
+- Experience with distributed systems
+- AWS/Cloud experience preferred
+- Leadership experience preferred
+
+Responsibilities:
+- Design scalable backend services
+- Lead technical initiatives
+- Mentor junior engineers
+- Collaborate with cross-functional teams
