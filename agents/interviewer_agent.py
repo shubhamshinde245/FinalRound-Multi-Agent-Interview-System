@@ -68,30 +68,38 @@ class InterviewerAgent:
             self._create_question_generation_tool(),
             self._create_follow_up_tool(),
             self._create_context_tool(),
-            self._create_conversation_flow_tool()
+            self._create_conversation_flow_tool(),
+            self._create_agent_coordination_tool(),
+            self._create_adaptive_questioning_tool()
         ]
         
         system_prompt = """
         You are the Interviewer Agent for a multi-agent interview system. Your role is to:
         
-        1. Generate contextually relevant interview questions
-        2. Adapt questions based on candidate responses and job requirements
-        3. Maintain natural conversation flow
-        4. Ask appropriate follow-up questions
-        5. Cover all required topics systematically
+        1. Generate contextually relevant interview questions based on guidance from TopicManagerAgent
+        2. Adapt questions based on candidate responses, job requirements, and evaluation feedback
+        3. Maintain natural conversation flow with smooth topic transitions
+        4. Ask appropriate follow-up questions guided by evaluation insights
+        5. Work with other agents to ensure comprehensive interview coverage
+        
+        Multi-agent coordination:
+        - Receive topic guidance from TopicManagerAgent (topic, depth, category)
+        - Consider evaluation feedback from EvaluatorAgent for question difficulty adjustment
+        - Coordinate with OrchestratorAgent for overall interview flow
         
         Question generation principles:
         - Base questions on job requirements and candidate background
-        - Adapt difficulty based on candidate's experience level
-        - Ask follow-up questions to dive deeper into responses
-        - Maintain professional and engaging tone
-        - Ensure comprehensive coverage of technical and behavioral aspects
+        - Use topic manager guidance for optimal topic flow and depth
+        - Adapt difficulty based on evaluation agent feedback about candidate performance
+        - Ask follow-up questions when evaluator indicates need for deeper exploration
+        - Maintain professional and engaging tone throughout
+        - Integrate evaluation insights to personalize question approach
         
         Question types to generate:
-        - Technical: Skills, technologies, problem-solving
-        - Behavioral: Past experiences, teamwork, leadership
-        - Situational: Hypothetical scenarios, decision-making
-        - System Design: Architecture, scalability, trade-offs
+        - Technical: Skills, technologies, problem-solving (with appropriate difficulty)
+        - Behavioral: Past experiences, teamwork, leadership (based on evaluation patterns)
+        - Situational: Hypothetical scenarios, decision-making (adapted to performance level)
+        - System Design: Architecture, scalability, trade-offs (with complexity matching ability)
         """
         
         return ReActAgent.from_tools(
@@ -120,15 +128,19 @@ class InterviewerAgent:
                 resume = self.shared_state.get("resume")
                 current_phase = self.session_manager.current_session.interview_phase if self.session_manager.current_session else "technical"
                 
-                # Generate contextual question based on type
+                # Get guidance from shared state (set by TopicManagerAgent and EvaluatorAgent)
+                suggested_depth = self.shared_state.get("suggested_depth", "medium")
+                evaluation_insights = self.shared_state.get("evaluation_insights", {})
+                
+                # Generate contextual question based on type and agent guidance
                 if question_type == "technical":
-                    question = self._generate_technical_question(topic, job_desc, resume)
+                    question = self._generate_technical_question(topic, job_desc, resume, suggested_depth, evaluation_insights)
                 elif question_type == "behavioral":
-                    question = self._generate_behavioral_question(topic, job_desc, resume)
+                    question = self._generate_behavioral_question(topic, job_desc, resume, suggested_depth, evaluation_insights)
                 elif question_type == "situational":
-                    question = self._generate_situational_question(topic, job_desc, resume)
+                    question = self._generate_situational_question(topic, job_desc, resume, suggested_depth, evaluation_insights)
                 elif question_type == "system_design":
-                    question = self._generate_system_design_question(topic, job_desc, resume)
+                    question = self._generate_system_design_question(topic, job_desc, resume, suggested_depth, evaluation_insights)
                 else:
                     template = random.choice(self.question_templates[question_type])
                     question = template.format(skill=topic, scenario=context, situation=topic)
@@ -280,8 +292,109 @@ class InterviewerAgent:
         
         return FunctionTool.from_defaults(fn=manage_conversation_flow)
     
-    def _generate_technical_question(self, topic: str, job_desc, resume) -> str:
-        """Generate a technical question based on job requirements and candidate background."""
+    def _create_agent_coordination_tool(self) -> FunctionTool:
+        def coordinate_with_agents(action: str, **kwargs) -> str:
+            """
+            Coordinate with other agents in the system.
+            
+            Args:
+                action: 'get_topic_guidance', 'get_evaluation_insights', 'request_depth_change', 'sync_context'
+            """
+            try:
+                if action == "get_topic_guidance":
+                    # Get current topic guidance from shared state (updated by TopicManagerAgent)
+                    topic_guidance = {
+                        "current_topic": self.shared_state.get("next_topic", ""),
+                        "suggested_depth": self.shared_state.get("suggested_depth", "medium"),
+                        "topic_category": self.shared_state.get("topic_category", "technical"),
+                        "transition_needed": self.shared_state.get("transition_needed", False)
+                    }
+                    return f"Topic guidance: {str(topic_guidance)}"
+                
+                elif action == "get_evaluation_insights":
+                    # Get evaluation insights from shared state (updated by EvaluatorAgent)
+                    evaluation_insights = {
+                        "performance_level": self.shared_state.get("performance_level", "medium"),
+                        "strong_areas": self.shared_state.get("strong_areas", []),
+                        "weak_areas": self.shared_state.get("weak_areas", []),
+                        "suggested_difficulty": self.shared_state.get("suggested_difficulty", "medium"),
+                        "needs_follow_up": self.shared_state.get("needs_follow_up", False)
+                    }
+                    return f"Evaluation insights: {str(evaluation_insights)}"
+                
+                elif action == "sync_context":
+                    # Update shared state with current interview context
+                    current_context = {
+                        "current_phase": self.session_manager.current_session.interview_phase if self.session_manager.current_session else "none",
+                        "questions_asked_count": len(self.session_manager.current_session.questions_asked) if self.session_manager.current_session else 0,
+                        "time_remaining": self.session_manager.get_time_remaining()
+                    }
+                    self.shared_state["interviewer_context"] = current_context
+                    return f"Context synced: {str(current_context)}"
+                
+                else:
+                    return f"Unknown coordination action: {action}"
+                    
+            except Exception as e:
+                return f"Error coordinating with agents: {str(e)}"
+        
+        return FunctionTool.from_defaults(fn=coordinate_with_agents)
+    
+    def _create_adaptive_questioning_tool(self) -> FunctionTool:
+        def adapt_questioning_strategy(
+            performance_feedback: str = "",
+            topic_guidance: str = "",
+            candidate_response: str = ""
+        ) -> str:
+            """
+            Adapt questioning strategy based on multi-agent feedback.
+            
+            Args:
+                performance_feedback: Feedback from EvaluatorAgent
+                topic_guidance: Guidance from TopicManagerAgent
+                candidate_response: Recent candidate response for context
+            """
+            try:
+                adaptations = []
+                
+                # Analyze performance feedback for difficulty adjustment
+                if "strong" in performance_feedback.lower() or "excellent" in performance_feedback.lower():
+                    adaptations.append("Increase question difficulty - candidate performing well")
+                    self.shared_state["suggested_difficulty"] = "high"
+                elif "weak" in performance_feedback.lower() or "struggling" in performance_feedback.lower():
+                    adaptations.append("Reduce question difficulty - provide more support")
+                    self.shared_state["suggested_difficulty"] = "low"
+                
+                # Analyze topic guidance for flow adjustments
+                if "transition" in topic_guidance.lower():
+                    adaptations.append("Prepare for topic transition")
+                elif "deeper" in topic_guidance.lower():
+                    adaptations.append("Ask more detailed follow-up questions")
+                
+                # Analyze candidate response patterns
+                if candidate_response:
+                    response_length = len(candidate_response.split())
+                    if response_length < 20:
+                        adaptations.append("Encourage more detailed responses")
+                    elif response_length > 150:
+                        adaptations.append("Guide toward more concise responses")
+                    
+                    # Check for uncertainty indicators
+                    uncertainty_phrases = ["not sure", "i think", "maybe", "probably"]
+                    if any(phrase in candidate_response.lower() for phrase in uncertainty_phrases):
+                        adaptations.append("Provide supportive follow-up questions")
+                
+                return f"Questioning strategy adapted: {'; '.join(adaptations) if adaptations else 'No adaptations needed'}"
+                
+            except Exception as e:
+                return f"Error adapting questioning strategy: {str(e)}"
+        
+        return FunctionTool.from_defaults(fn=adapt_questioning_strategy)
+    
+    def _generate_technical_question(self, topic: str, job_desc, resume, depth: str = "medium", insights: Dict = None) -> str:
+        """Generate a technical question based on job requirements, candidate background, and agent guidance."""
+        insights = insights or {}
+        
         if not topic and job_desc:
             # Pick a technical requirement from job description
             tech_requirements = [req for req in job_desc.requirements if req.category == "technical_skill"]
@@ -291,18 +404,37 @@ class InterviewerAgent:
         if not topic:
             topic = "your technical background"
         
-        templates = [
-            f"Can you describe your hands-on experience with {topic}?",
-            f"How have you used {topic} in your recent projects?",
-            f"What aspects of {topic} do you find most challenging?",
-            f"Can you walk me through a specific example where you implemented {topic}?",
-            f"How do you approach learning new features or updates in {topic}?"
-        ]
+        # Adapt question templates based on depth and performance insights
+        if depth == "surface" or insights.get("suggested_difficulty") == "low":
+            templates = [
+                f"Can you tell me about your experience with {topic}?",
+                f"How familiar are you with {topic}?",
+                f"Have you worked with {topic} in any of your projects?",
+                f"What do you know about {topic}?"
+            ]
+        elif depth == "deep" or insights.get("suggested_difficulty") == "high":
+            templates = [
+                f"Can you explain the internal architecture and optimization strategies you'd use when implementing {topic} at scale?",
+                f"How would you debug performance issues in a {topic}-based system under high load?",
+                f"What are the key trade-offs and design patterns you'd consider when architecting a system using {topic}?",
+                f"Can you walk me through how you'd handle edge cases and error scenarios in a production {topic} implementation?",
+                f"How would you approach migrating a legacy system to use {topic} while maintaining zero downtime?"
+            ]
+        else:  # medium depth
+            templates = [
+                f"Can you describe your hands-on experience with {topic} and any challenges you've overcome?",
+                f"How have you used {topic} in your recent projects, and what results did you achieve?",
+                f"What aspects of {topic} do you find most challenging, and how do you address them?",
+                f"Can you walk me through a specific example where you implemented {topic} and the decisions you made?",
+                f"How do you approach learning new features or best practices in {topic}?"
+            ]
         
         return random.choice(templates)
     
-    def _generate_behavioral_question(self, topic: str, job_desc, resume) -> str:
-        """Generate a behavioral question based on job requirements."""
+    def _generate_behavioral_question(self, topic: str, job_desc, resume, depth: str = "medium", insights: Dict = None) -> str:
+        """Generate a behavioral question based on job requirements and agent guidance."""
+        insights = insights or {}
+        
         behavioral_scenarios = [
             "had to work with a difficult team member",
             "faced a tight deadline with multiple competing priorities",
@@ -314,27 +446,44 @@ class InterviewerAgent:
         ]
         
         scenario = topic if topic else random.choice(behavioral_scenarios)
-        return f"Tell me about a time when you {scenario}. What was the situation, what did you do, and what was the outcome?"
+        
+        # Adapt question format based on depth and insights
+        if depth == "surface" or insights.get("needs_follow_up") == False:
+            return f"Can you tell me about a time when you {scenario}?"
+        elif depth == "deep" or insights.get("performance_level") == "high":
+            return f"Tell me about a time when you {scenario}. I'm particularly interested in your thought process, the alternatives you considered, how you measured success, and what you learned that you now apply in similar situations."
+        else:  # medium depth
+            return f"Tell me about a time when you {scenario}. What was the situation, what did you do, and what was the outcome?"
     
-    def _generate_situational_question(self, topic: str, job_desc, resume) -> str:
-        """Generate a situational question based on job context."""
-        if job_desc and job_desc.responsibilities:
+    def _generate_situational_question(self, topic: str, job_desc, resume, depth: str = "medium", insights: Dict = None) -> str:
+        """Generate a situational question based on job context and agent guidance."""
+        insights = insights or {}
+        
+        if job_desc and job_desc.responsibilities and not topic:
             responsibility = random.choice(job_desc.responsibilities)
-            return f"How would you approach {responsibility.lower()}? What steps would you take?"
+            scenario = f"you needed to {responsibility.lower()}"
+        else:
+            situational_scenarios = [
+                "you inherited a legacy codebase with poor documentation",
+                "you needed to optimize a slow-performing system",
+                "you had to choose between two different architectural approaches",
+                "you discovered a security vulnerability in production",
+                "you needed to integrate with a third-party API that had limited documentation"
+            ]
+            scenario = topic if topic else random.choice(situational_scenarios)
         
-        situational_scenarios = [
-            "you inherited a legacy codebase with poor documentation",
-            "you needed to optimize a slow-performing system",
-            "you had to choose between two different architectural approaches",
-            "you discovered a security vulnerability in production",
-            "you needed to integrate with a third-party API that had limited documentation"
-        ]
-        
-        scenario = topic if topic else random.choice(situational_scenarios)
-        return f"Imagine {scenario}. How would you handle this situation?"
+        # Adapt question complexity based on depth and performance insights
+        if depth == "surface" or insights.get("suggested_difficulty") == "low":
+            return f"How would you handle a situation where {scenario}?"
+        elif depth == "deep" or insights.get("suggested_difficulty") == "high":
+            return f"Imagine {scenario}. Walk me through your complete approach including stakeholder communication, risk assessment, implementation strategy, monitoring, and how you'd handle potential complications."
+        else:  # medium depth
+            return f"Imagine {scenario}. How would you handle this situation? What steps would you take and what factors would you consider?"
     
-    def _generate_system_design_question(self, topic: str, job_desc, resume) -> str:
-        """Generate a system design question."""
+    def _generate_system_design_question(self, topic: str, job_desc, resume, depth: str = "medium", insights: Dict = None) -> str:
+        """Generate a system design question based on depth and performance insights."""
+        insights = insights or {}
+        
         if not topic:
             design_topics = [
                 "a URL shortener service",
@@ -347,7 +496,13 @@ class InterviewerAgent:
             ]
             topic = random.choice(design_topics)
         
-        return f"How would you design {topic}? Consider scalability, reliability, and performance in your approach."
+        # Adapt question complexity based on depth and performance
+        if depth == "surface" or insights.get("suggested_difficulty") == "low":
+            return f"How would you approach designing {topic}? What are the main components you'd consider?"
+        elif depth == "deep" or insights.get("suggested_difficulty") == "high":
+            return f"Design {topic} for a company with 100M+ users. Address scalability, reliability, performance, security, monitoring, disaster recovery, cost optimization, and how you'd handle data consistency across multiple regions."
+        else:  # medium depth
+            return f"How would you design {topic}? Consider scalability, reliability, and performance in your approach, and explain your trade-offs."
     
     def start_interview(self) -> str:
         """Generate an opening question to start the interview."""
@@ -434,24 +589,48 @@ class InterviewerAgent:
         
         return "\n".join(prompt_parts)
     
-    def generate_next_question(self, context: str = "") -> str:
-        """Generate the next appropriate question based on current interview state."""
+    def generate_next_question(self, context: str = "", previous_response: str = "") -> str:
+        """Generate the next appropriate question based on current interview state and agent coordination."""
         try:
+            # Get coordination data from other agents
+            self.agent.chat("coordinate_with_agents('sync_context')")
+            topic_guidance = self.agent.chat("coordinate_with_agents('get_topic_guidance')")
+            evaluation_insights = self.agent.chat("coordinate_with_agents('get_evaluation_insights')")
+            
+            # Adapt questioning strategy based on multi-agent feedback
+            if previous_response:
+                adaptation_result = self.agent.chat(f"adapt_questioning_strategy('', '{topic_guidance}', '{previous_response}')")
+            
             current_phase = self.session_manager.current_session.interview_phase if self.session_manager.current_session else "introduction"
             current_topic = self.shared_state.get("next_topic", "")
+            suggested_depth = self.shared_state.get("suggested_depth", "medium")
             
             if current_phase == "introduction":
                 return self.start_interview()
             elif current_phase == "technical":
-                return self.agent.chat(f"generate_question('technical', '{current_topic}')")
-            elif current_phase == "behavioral":
-                return self.agent.chat("generate_question('behavioral')")
-            else:
-                # Default to contextual question
                 return self.agent.chat(f"generate_question('technical', '{current_topic}', '{context}')")
+            elif current_phase == "behavioral":
+                return self.agent.chat(f"generate_question('behavioral', '{current_topic}', '{context}')")
+            else:
+                # Default to contextual question with agent guidance
+                question_type = self.shared_state.get("topic_category", "technical")
+                return self.agent.chat(f"generate_question('{question_type}', '{current_topic}', '{context}')")
                 
         except Exception as e:
             return f"Error generating next question: {str(e)}"
+    
+    def process_candidate_response(self, response: str, question: str, topic: str = "") -> str:
+        """Process candidate response and coordinate with evaluation agent."""
+        try:
+            # Update shared state with response context
+            self.shared_state["latest_response"] = response
+            self.shared_state["latest_question"] = question
+            
+            # The actual evaluation will be handled by the orchestrator's coordination
+            return f"Response processed for evaluation: {len(response.split())} words"
+            
+        except Exception as e:
+            return f"Error processing response: {str(e)}"
     
     def chat(self, message: str) -> str:
         """Handle interviewer-level queries and commands."""

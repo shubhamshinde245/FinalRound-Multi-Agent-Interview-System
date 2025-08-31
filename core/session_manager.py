@@ -20,6 +20,10 @@ class InterviewState:
     last_activity: datetime = None
     is_active: bool = True
     interview_phase: str = "introduction"  # introduction, technical, behavioral, conclusion
+    # New fields for enhanced multi-agent support
+    topic_progression: Dict = None  # Topic flow and coverage tracking
+    detailed_evaluations: List[Dict] = None  # Detailed evaluation history from EvaluatorAgent
+    agent_coordination_data: Dict = None  # Inter-agent coordination state
     
     def __post_init__(self):
         if self.questions_asked is None:
@@ -31,10 +35,31 @@ class InterviewState:
                 "technical_knowledge": 0,
                 "communication_skills": 0,
                 "problem_solving": 0,
+                "depth_of_thinking": 0,
+                "relevance": 0,
+                "clarity": 0,
                 "overall": 0
             }
         if self.last_activity is None:
             self.last_activity = datetime.now()
+        # Initialize new fields
+        if self.topic_progression is None:
+            self.topic_progression = {
+                "current_sequence": [],
+                "completed_topics": [],
+                "current_index": 0,
+                "coverage_score": 0.0,
+                "time_allocation": {}
+            }
+        if self.detailed_evaluations is None:
+            self.detailed_evaluations = []
+        if self.agent_coordination_data is None:
+            self.agent_coordination_data = {
+                "orchestrator_state": {},
+                "topic_manager_state": {},
+                "interviewer_state": {},
+                "evaluator_state": {}
+            }
 
 
 class SessionManager:
@@ -151,6 +176,51 @@ class SessionManager:
             self.current_session.interview_phase = phase
             self.update_activity()
     
+    def update_topic_progression(self, progression_data: Dict):
+        """Update topic progression data from TopicManagerAgent."""
+        if self.current_session:
+            self.current_session.topic_progression.update(progression_data)
+            self.update_activity()
+    
+    def add_detailed_evaluation(self, evaluation_data: Dict):
+        """Add detailed evaluation from EvaluatorAgent."""
+        if self.current_session:
+            # Add timestamp if not present
+            if 'timestamp' not in evaluation_data:
+                evaluation_data['timestamp'] = datetime.now().isoformat()
+            
+            self.current_session.detailed_evaluations.append(evaluation_data)
+            self.update_activity()
+    
+    def update_agent_state(self, agent_name: str, state_data: Dict):
+        """Update state data for a specific agent."""
+        if self.current_session:
+            agent_key = f"{agent_name}_state"
+            if agent_key in self.current_session.agent_coordination_data:
+                self.current_session.agent_coordination_data[agent_key].update(state_data)
+            else:
+                self.current_session.agent_coordination_data[agent_key] = state_data
+            self.update_activity()
+    
+    def get_agent_state(self, agent_name: str) -> Dict:
+        """Get state data for a specific agent."""
+        if self.current_session:
+            agent_key = f"{agent_name}_state"
+            return self.current_session.agent_coordination_data.get(agent_key, {})
+        return {}
+    
+    def get_topic_progression(self) -> Dict:
+        """Get current topic progression data."""
+        if self.current_session:
+            return self.current_session.topic_progression
+        return {}
+    
+    def get_detailed_evaluations(self) -> List[Dict]:
+        """Get all detailed evaluations."""
+        if self.current_session:
+            return self.current_session.detailed_evaluations
+        return []
+    
     def check_timeout(self) -> bool:
         if not self.current_session or not self.current_session.is_active:
             return False
@@ -231,7 +301,12 @@ class SessionManager:
             "total_responses": len(self.current_session.responses),
             "interview_duration": str(datetime.now() - self.current_session.start_time),
             "phases_completed": self.current_session.interview_phase,
-            "detailed_feedback": self._generate_detailed_feedback()
+            "detailed_feedback": self._generate_detailed_feedback(),
+            # Enhanced evaluation data
+            "topic_coverage": self.current_session.topic_progression,
+            "detailed_evaluations": self.current_session.detailed_evaluations,
+            "agent_insights": self._generate_agent_insights(),
+            "performance_trends": self._analyze_performance_trends()
         }
         
         # Save evaluation
@@ -284,6 +359,58 @@ class SessionManager:
         
         return feedback
     
+    def _generate_agent_insights(self) -> Dict:
+        """Generate insights from all agents for the final evaluation."""
+        if not self.current_session:
+            return {}
+        
+        insights = {
+            "topic_management": {
+                "coverage_achieved": self.current_session.topic_progression.get("coverage_score", 0),
+                "topics_completed": len(self.current_session.topic_progression.get("completed_topics", [])),
+                "time_utilization": "efficient" if self.current_session.topic_progression.get("coverage_score", 0) > 0.7 else "needs_improvement"
+            },
+            "evaluation_consistency": {
+                "total_evaluations": len(self.current_session.detailed_evaluations),
+                "evaluation_depth": "comprehensive" if len(self.current_session.detailed_evaluations) > 3 else "limited"
+            }
+        }
+        
+        return insights
+    
+    def _analyze_performance_trends(self) -> Dict:
+        """Analyze candidate performance trends over the course of the interview."""
+        if not self.current_session or not self.current_session.detailed_evaluations:
+            return {}
+        
+        evaluations = self.current_session.detailed_evaluations
+        
+        if len(evaluations) < 2:
+            return {"trend": "insufficient_data"}
+        
+        # Calculate trend in overall scores
+        scores = [eval.get("overall_score", 0) for eval in evaluations if "overall_score" in eval]
+        
+        if len(scores) < 2:
+            return {"trend": "insufficient_score_data"}
+        
+        # Simple trend analysis
+        first_half_avg = sum(scores[:len(scores)//2]) / max(len(scores)//2, 1)
+        second_half_avg = sum(scores[len(scores)//2:]) / max(len(scores) - len(scores)//2, 1)
+        
+        trend = "stable"
+        if second_half_avg > first_half_avg + 0.5:
+            trend = "improving"
+        elif second_half_avg < first_half_avg - 0.5:
+            trend = "declining"
+        
+        return {
+            "trend": trend,
+            "first_half_average": first_half_avg,
+            "second_half_average": second_half_avg,
+            "total_evaluations": len(scores)
+        }
+    
     def _start_auto_save_thread(self):
         def auto_save():
             while True:
@@ -309,5 +436,14 @@ class SessionManager:
             "questions_asked": len(self.current_session.questions_asked),
             "time_remaining": self.get_time_remaining(),
             "is_active": self.current_session.is_active,
-            "scores": self.current_session.evaluation_scores
+            "scores": self.current_session.evaluation_scores,
+            # Enhanced summary data
+            "topic_progression": {
+                "completed_topics": len(self.current_session.topic_progression.get("completed_topics", [])),
+                "coverage_score": self.current_session.topic_progression.get("coverage_score", 0)
+            },
+            "evaluation_summary": {
+                "detailed_evaluations_count": len(self.current_session.detailed_evaluations),
+                "latest_evaluation": self.current_session.detailed_evaluations[-1] if self.current_session.detailed_evaluations else None
+            }
         }
