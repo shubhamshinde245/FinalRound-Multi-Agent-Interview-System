@@ -5,7 +5,14 @@
 [![OpenAI](https://img.shields.io/badge/OpenAI-GPT--4-orange)](https://openai.com/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-> **Next-generation AI-powered technical interview system with intelligent multi-agent coordination, real-time candidate evaluation, and adaptive question generation.**
+<summary>▶️ <b>Watch the <a href="https://youtu.be/iH9185IzwKc" target="_blank">YouTube Demo Video</a></b></summary>
+<p align="center">
+  <a href="https://youtu.be/iH9185IzwKc" target="_blank">
+    <img src="https://img.youtube.com/vi/iH9185IzwKc/0.jpg" alt="YouTube Demo" width="480"/>
+  </a>
+</p>
+
+**Next-generation AI-powered technical interview system with intelligent multi-agent coordination, real-time candidate evaluation, and adaptive question generation.**
 
 ## 🚀 Overview
 
